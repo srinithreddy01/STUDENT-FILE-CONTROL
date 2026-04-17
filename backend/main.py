@@ -287,13 +287,27 @@ def dashboard_page():
     ui.add_css(GLOBAL_CSS + 'body { background-color: #f1f5f9; }')
 
     # Mutable state
-    st = {'folder_id': None, 'folder_name': 'All Files'}
+    st = {
+        'folder_id':   None,
+        'folder_name': 'All Files',
+        'history':     [],          # list of (folder_id, folder_name) for Back navigation
+    }
 
     # ── Navbar ──────────────────────────────────────────────────────
     with ui.header(elevated=False).classes(
-        'bg-white border-b px-6 h-16 items-center justify-between shadow-sm z-50'
+        'bg-white border-b px-4 h-16 items-center justify-between shadow-sm z-50'
     ):
-        with ui.row().classes('items-center gap-3'):
+        with ui.row().classes('items-center gap-2'):
+
+            # ── Back arrow button ─────────────────────────────────
+            back_btn = ui.button(
+                icon='arrow_back',
+                on_click=lambda: go_back()
+            ).props('flat round dense').classes(
+                'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+            ).tooltip('Go back')
+
+            # Brand
             ui.icon('folder_copy', color='primary', size='24px')
             ui.label('Student Sync').classes('text-xl font-bold text-blue-600')
 
@@ -372,18 +386,44 @@ def dashboard_page():
     #  INNER FUNCTIONS
     # ══════════════════════════════════════════════════════════════
 
-    def select_folder(folder_id, folder_name):
+    def _apply_folder(folder_id, folder_name):
+        """Update state and refresh UI — does NOT touch history."""
         st['folder_id']   = folder_id
         st['folder_name'] = folder_name
         page_title.set_text(folder_name)
         hint = (
-            f'📁 Uploading into folder: {folder_name}'
+            f'📁 Uploading into: {folder_name}'
             if folder_id is not None
             else 'Drag & drop or click to browse — files over 50 MB fully supported'
         )
         folder_hint_label.set_text(hint)
+        # Enable/disable back button
+        back_btn.props(
+            'flat round dense' +
+            ('' if st['history'] else ' disable')
+        )
         build_sidebar()
         load_files()
+
+    def select_folder(folder_id, folder_name):
+        """Navigate INTO a folder — push current location onto history stack."""
+        # Push current before switching (skip duplicates)
+        prev = (st['folder_id'], st['folder_name'])
+        if not st['history'] or st['history'][-1] != prev:
+            st['history'].append(prev)
+        _apply_folder(folder_id, folder_name)
+
+    def go_back():
+        """Pop the history stack and return to the previous location."""
+        if not st['history']:
+            return
+        prev_id, prev_name = st['history'].pop()
+        _apply_folder(prev_id, prev_name)
+
+    def go_home():
+        """Jump to All Files, clearing history."""
+        st['history'].clear()
+        _apply_folder(None, 'All Files')
 
     # ── Build sidebar ───────────────────────────────────────────────
     def build_sidebar():
@@ -395,20 +435,21 @@ def dashboard_page():
         conn.close()
 
         with sidebar_col:
-            ui.label('NAVIGATION').classes(
-                'text-xs font-bold uppercase tracking-widest text-gray-300 px-2 mb-1'
-            )
 
-            # All Files row
-            is_all = st['folder_id'] is None
+            # ── HOME button (always visible, prominent) ────────────
             with ui.element('div').classes(
-                'flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer mb-1 text-sm font-medium ' +
-                ('bg-blue-50 text-blue-600 border border-blue-200' if is_all else 'text-gray-500 hover:bg-gray-100')
-            ).on('click', lambda: select_folder(None, 'All Files')):
-                ui.icon('home', size='18px')
-                ui.label('All Files').classes('flex-1')
+                'flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer mb-2 '
+                'font-semibold text-sm '
+                + ('bg-blue-600 text-white shadow-md'
+                   if st['folder_id'] is None
+                   else 'bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100')
+            ).on('click', lambda: go_home()):
+                ui.icon('home', size='20px')
+                ui.label('Home').classes('flex-1')
+                if st['folder_id'] is None:
+                    ui.icon('check_circle', size='16px').classes('opacity-70')
 
-            ui.separator().classes('my-3')
+            ui.separator().classes('my-2')
             ui.label('MY FOLDERS').classes(
                 'text-xs font-bold uppercase tracking-widest text-gray-300 px-2 mb-1'
             )
@@ -619,6 +660,7 @@ def dashboard_page():
                             ).props('flat round dense color=red').tooltip('Delete file')
 
     # ── Initial render ───────────────────────────────────────────────
+    back_btn.props('flat round dense disable')   # no history yet
     build_sidebar()
     load_files()
 
