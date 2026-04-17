@@ -9,26 +9,33 @@ from flask import (
     url_for, session, send_file, jsonify
 )
 
-# ── App setup ──────────────────────────────────────────────────────────────────
+# ── App ────────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = 'studentsync_secretkey_2026'
+app.secret_key = 'studentsync_2026_secret_key_xyz'
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024   # 500 MB
 
-BASE_DIR      = os.path.dirname(__file__)
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 DB_FILE       = os.path.join(BASE_DIR, 'database.db')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ── Jinja2 custom filter ───────────────────────────────────────────────────────
-@app.template_filter('format_size')
-def format_size(size):
-    if not size or size == 0:
-        return '0 B'
-    units = ['B', 'KB', 'MB', 'GB', 'TB']
-    i = int(math.floor(math.log(size, 1024)))
-    i = min(i, len(units) - 1)
-    return f"{size / (1024 ** i):.1f} {units[i]}"
+# ── Jinja2 filters ─────────────────────────────────────────────────────────────
+@app.template_filter('fsize')
+def fsize_filter(b):
+    try:
+        b = int(b)
+        if b == 0: return '0 B'
+        u = ['B','KB','MB','GB','TB']
+        i = min(int(math.floor(math.log(max(b,1), 1024))), len(u)-1)
+        return f"{b/(1024**i):.1f} {u[i]}"
+    except Exception:
+        return '? B'
+
+@app.template_filter('fdate')
+def fdate_filter(s):
+    try: return str(s)[:10]
+    except Exception: return str(s)
 
 
 # ── Database ───────────────────────────────────────────────────────────────────
@@ -37,290 +44,266 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_db():
-    conn = get_db()
-    conn.executescript('''
+    c = get_db()
+    c.executescript('''
         CREATE TABLE IF NOT EXISTS users (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+            password BLOB NOT NULL
         );
         CREATE TABLE IF NOT EXISTS folders (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      INTEGER NOT NULL,
-            name         TEXT NOT NULL,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name    TEXT NOT NULL,
+            created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS files (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       INTEGER NOT NULL,
             folder_id     INTEGER,
-            filename      TEXT NOT NULL,
+            stored_name   TEXT NOT NULL,
             original_name TEXT NOT NULL,
-            size          INTEGER NOT NULL,
-            upload_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id)   REFERENCES users(id),
-            FOREIGN KEY(folder_id) REFERENCES folders(id)
+            size          INTEGER NOT NULL DEFAULT 0,
+            uploaded      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     ''')
-    conn.commit()
-    conn.close()
-
+    c.commit(); c.close()
 
 init_db()
 
 
-# ── Auth decorator ─────────────────────────────────────────────────────────────
+# ── Auth guard ─────────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def wrapper(*a, **kw):
         if 'user_id' not in session:
-            return redirect(url_for('auth'))
-        return f(*args, **kwargs)
-    return decorated
+            return redirect(url_for('auth_page'))
+        return f(*a, **kw)
+    return wrapper
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  AUTH ROUTES
+#  AUTHENTICATION
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/')
-def index():
-    return redirect(url_for('dashboard') if 'user_id' in session else url_for('auth'))
-
+def root():
+    return redirect(url_for('dashboard') if 'user_id' in session else url_for('auth_page'))
 
 @app.route('/auth')
-def auth():
+def auth_page():
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return render_template('auth.html')
 
-
 @app.route('/auth/login', methods=['POST'])
-def login():
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '')
-
-    conn = get_db()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-    conn.close()
-
-    if user and bcrypt.checkpw(password.encode(), user['password']):
-        session['user_id']  = user['id']
-        session['username'] = user['username']
-        return redirect(url_for('dashboard'))
-
-    return render_template('auth.html',
-        error_login='Invalid username or password',
-        show_signup=False)
-
-
-@app.route('/auth/signup', methods=['POST'])
-def signup():
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '')
+def do_login():
+    username = (request.form.get('username') or '').strip()
+    password =  request.form.get('password') or ''
 
     if not username or not password:
         return render_template('auth.html',
-            error_signup='All fields are required', show_signup=True)
+            login_error='Please fill in all fields.', show='login')
 
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute('INSERT INTO users (username, password) VALUES (?, ?)',
-                    (username, hashed))
-        conn.commit()
-        user_id = cur.lastrowid
-    except sqlite3.IntegrityError:
-        conn.close()
+    c    = get_db()
+    user = c.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
+    c.close()
+
+    if not user or not bcrypt.checkpw(password.encode(), bytes(user['password'])):
         return render_template('auth.html',
-            error_signup='Username already taken', show_signup=True)
-    conn.close()
+            login_error='Incorrect username or password.', show='login')
 
-    session['user_id']  = user_id
-    session['username'] = username
+    session.clear()
+    session['user_id']  = user['id']
+    session['username'] = user['username']
     return redirect(url_for('dashboard'))
 
+@app.route('/auth/signup', methods=['POST'])
+def do_signup():
+    username = (request.form.get('username') or '').strip()
+    password =  request.form.get('password') or ''
+
+    if not username or not password:
+        return render_template('auth.html',
+            signup_error='Please fill in all fields.', show='signup')
+    if len(password) < 6:
+        return render_template('auth.html',
+            signup_error='Password must be at least 6 characters.', show='signup')
+
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    c = get_db()
+    try:
+        cur = c.cursor()
+        cur.execute('INSERT INTO users (username, password) VALUES (?,?)', (username, hashed))
+        c.commit()
+        uid = cur.lastrowid
+    except sqlite3.IntegrityError:
+        c.close()
+        return render_template('auth.html',
+            signup_error='Username already taken — choose another.', show='signup')
+    c.close()
+
+    session.clear()
+    session['user_id']  = uid
+    session['username'] = username
+    return redirect(url_for('dashboard'))
 
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('auth'))
+    return redirect(url_for('auth_page'))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  DASHBOARD
+#  DASHBOARD (server-rendered)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    user_id   = session['user_id']
+    uid       = session['user_id']
     folder_id = request.args.get('folder')   # None | 'root' | '<int>'
 
-    conn = get_db()
-    folders = conn.execute(
-        'SELECT * FROM folders WHERE user_id = ? ORDER BY name ASC',
-        (user_id,)
+    c       = get_db()
+    folders = c.execute(
+        'SELECT * FROM folders WHERE user_id=? ORDER BY name COLLATE NOCASE', (uid,)
     ).fetchall()
 
     if folder_id == 'root':
-        files = conn.execute(
-            'SELECT * FROM files WHERE user_id = ? AND folder_id IS NULL '
-            'ORDER BY upload_date DESC', (user_id,)
-        ).fetchall()
-        current_label = 'Uncategorised'
+        files = c.execute(
+            'SELECT * FROM files WHERE user_id=? AND folder_id IS NULL ORDER BY uploaded DESC',
+            (uid,)).fetchall()
+        label = 'Uncategorised'
     elif folder_id:
-        files = conn.execute(
-            'SELECT * FROM files WHERE user_id = ? AND folder_id = ? '
-            'ORDER BY upload_date DESC', (user_id, folder_id)
-        ).fetchall()
-        match = next((f for f in folders if str(f['id']) == folder_id), None)
-        current_label = match['name'] if match else 'Folder'
+        files = c.execute(
+            'SELECT * FROM files WHERE user_id=? AND folder_id=? ORDER BY uploaded DESC',
+            (uid, folder_id)).fetchall()
+        m     = next((f for f in folders if str(f['id']) == folder_id), None)
+        label = m['name'] if m else 'Folder'
     else:
-        files = conn.execute(
-            'SELECT * FROM files WHERE user_id = ? ORDER BY upload_date DESC',
-            (user_id,)
-        ).fetchall()
-        current_label = 'All Files'
+        files = c.execute(
+            'SELECT * FROM files WHERE user_id=? ORDER BY uploaded DESC',
+            (uid,)).fetchall()
+        label = 'All Files'
 
-    conn.close()
-
+    c.close()
     return render_template('dashboard.html',
         folders=folders,
         files=files,
         active_folder=folder_id,
-        current_label=current_label,
-        username=session['username']
-    )
+        folder_label=label,
+        username=session['username'])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FOLDER ROUTES  (AJAX / JSON)
+#  FOLDER API  (all POST — maximally browser-compatible)
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.route('/folder/create', methods=['POST'])
+@app.route('/api/folder/create', methods=['POST'])
 @login_required
-def create_folder():
-    name    = request.form.get('name', '').strip()
-    user_id = session['user_id']
+def api_create_folder():
+    uid  = session['user_id']
+    name = (request.form.get('name') or '').strip()
 
     if not name:
-        return jsonify({'error': 'Folder name is required'}), 400
+        return jsonify(error='Folder name cannot be empty.'), 400
 
-    conn = get_db()
-    if conn.execute('SELECT id FROM folders WHERE user_id = ? AND name = ?',
-                    (user_id, name)).fetchone():
-        conn.close()
-        return jsonify({'error': 'A folder with that name already exists'}), 409
+    c = get_db()
+    if c.execute('SELECT id FROM folders WHERE user_id=? AND name=?', (uid, name)).fetchone():
+        c.close()
+        return jsonify(error='A folder with that name already exists.'), 409
 
-    cur = conn.cursor()
-    cur.execute('INSERT INTO folders (user_id, name) VALUES (?, ?)', (user_id, name))
-    conn.commit()
-    folder_id = cur.lastrowid
-    conn.close()
-    return jsonify({'id': folder_id, 'name': name}), 201
+    cur = c.cursor()
+    cur.execute('INSERT INTO folders (user_id, name) VALUES (?,?)', (uid, name))
+    c.commit()
+    fid = cur.lastrowid
+    c.close()
+    return jsonify(ok=True, id=fid, name=name), 201
 
-
-@app.route('/folder/<int:folder_id>', methods=['DELETE'])
+@app.route('/api/folder/<int:fid>/delete', methods=['POST'])
 @login_required
-def delete_folder(folder_id):
-    user_id = session['user_id']
-    conn = get_db()
-    row = conn.execute(
-        'SELECT id FROM folders WHERE id = ? AND user_id = ?',
-        (folder_id, user_id)
-    ).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({'error': 'Not found'}), 404
+def api_delete_folder(fid):
+    uid = session['user_id']
+    c   = get_db()
 
-    conn.execute('UPDATE files SET folder_id = NULL WHERE folder_id = ?', (folder_id,))
-    conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'Folder deleted'}), 200
+    if not c.execute('SELECT id FROM folders WHERE id=? AND user_id=?', (fid, uid)).fetchone():
+        c.close()
+        return jsonify(error='Folder not found.'), 404
+
+    # Move files in this folder to un-categorised
+    c.execute('UPDATE files SET folder_id=NULL WHERE folder_id=?', (fid,))
+    c.execute('DELETE FROM folders WHERE id=?', (fid,))
+    c.commit(); c.close()
+    return jsonify(ok=True), 200
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FILE ROUTES
+#  FILE API
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.route('/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST'])
 @login_required
-def upload():
-    user_id   = session['user_id']
+def api_upload():
+    uid       = session['user_id']
     folder_id = request.form.get('folder_id') or None
 
     if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+        return jsonify(error='No file provided.'), 400
 
     f = request.files['file']
-    if not f.filename:
-        return jsonify({'error': 'No filename'}), 400
+    if not f or not f.filename:
+        return jsonify(error='Invalid file.'), 400
 
-    original_name = f.filename
-    ext          = os.path.splitext(original_name)[1]
-    unique_name  = str(uuid.uuid4()) + ext
-    save_path    = os.path.join(UPLOAD_FOLDER, unique_name)
-    f.save(save_path)
-    size = os.path.getsize(save_path)
+    original = f.filename
+    ext      = os.path.splitext(original)[1]
+    stored   = str(uuid.uuid4()) + ext
+    path     = os.path.join(UPLOAD_FOLDER, stored)
+    f.save(path)
+    size = os.path.getsize(path)
 
-    conn = get_db()
-    conn.execute(
-        'INSERT INTO files (user_id, folder_id, filename, original_name, size) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (user_id, folder_id, unique_name, original_name, size)
-    )
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'Uploaded successfully', 'name': original_name}), 201
+    c = get_db()
+    c.execute(
+        'INSERT INTO files (user_id, folder_id, stored_name, original_name, size) VALUES (?,?,?,?,?)',
+        (uid, folder_id, stored, original, size))
+    c.commit(); c.close()
+    return jsonify(ok=True, name=original), 201
 
-
-@app.route('/download/<int:file_id>')
+@app.route('/api/file/<int:fid>/delete', methods=['POST'])
 @login_required
-def download(file_id):
-    user_id = session['user_id']
-    conn    = get_db()
-    rec     = conn.execute(
-        'SELECT * FROM files WHERE id = ? AND user_id = ?', (file_id, user_id)
-    ).fetchone()
-    conn.close()
+def api_delete_file(fid):
+    uid = session['user_id']
+    c   = get_db()
+    rec = c.execute('SELECT * FROM files WHERE id=? AND user_id=?', (fid, uid)).fetchone()
 
     if not rec:
-        return 'File not found or access denied', 404
+        c.close()
+        return jsonify(error='File not found.'), 404
 
-    path = os.path.join(UPLOAD_FOLDER, rec['filename'])
+    p = os.path.join(UPLOAD_FOLDER, rec['stored_name'])
+    if os.path.exists(p):
+        os.remove(p)
+
+    c.execute('DELETE FROM files WHERE id=?', (fid,))
+    c.commit(); c.close()
+    return jsonify(ok=True), 200
+
+@app.route('/download/<int:fid>')
+@login_required
+def download(fid):
+    uid = session['user_id']
+    c   = get_db()
+    rec = c.execute('SELECT * FROM files WHERE id=? AND user_id=?', (fid, uid)).fetchone()
+    c.close()
+
+    if not rec:
+        return 'File not found', 404
+
+    path = os.path.join(UPLOAD_FOLDER, rec['stored_name'])
     if not os.path.exists(path):
         return 'File missing on server', 404
 
     return send_file(path, as_attachment=True, download_name=rec['original_name'])
-
-
-@app.route('/file/<int:file_id>', methods=['DELETE'])
-@login_required
-def delete_file(file_id):
-    user_id = session['user_id']
-    conn    = get_db()
-    rec     = conn.execute(
-        'SELECT * FROM files WHERE id = ? AND user_id = ?', (file_id, user_id)
-    ).fetchone()
-
-    if not rec:
-        conn.close()
-        return jsonify({'error': 'Not found'}), 404
-
-    path = os.path.join(UPLOAD_FOLDER, rec['filename'])
-    if os.path.exists(path):
-        os.remove(path)
-
-    conn.execute('DELETE FROM files WHERE id = ?', (file_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'File deleted'}), 200
 
 
 # ── Run ────────────────────────────────────────────────────────────────────────

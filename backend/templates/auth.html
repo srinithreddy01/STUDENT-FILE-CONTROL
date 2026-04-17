@@ -4,52 +4,77 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Student Sync — Sign In</title>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-<div class="auth-container">
-  <div class="auth-card">
-    <div class="auth-logo">
-      <span class="auth-logo-dot"></span> Student Sync
-    </div>
-    <p class="auth-sub">Your secure cloud file manager</p>
+<div class="auth-page">
+  <div class="auth-box">
 
-    <!-- Tab strip -->
-    <div class="auth-tabs">
-      <button class="auth-tab {% if not show_signup %}active{% endif %}"
-              onclick="switchTab('login')">Sign In</button>
-      <button class="auth-tab {% if show_signup %}active{% endif %}"
-              onclick="switchTab('signup')">Sign Up</button>
+    <!-- Brand -->
+    <div class="auth-brand">
+      <div class="auth-brand-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+             stroke-width="1.8" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/>
+        </svg>
+      </div>
+      <span class="auth-brand-name">Student Sync</span>
+    </div>
+    <p class="auth-tagline">Securely manage your study files from anywhere.</p>
+
+    <!-- Tabs -->
+    <div class="tab-strip">
+      <button class="tab-btn {% if show != 'signup' %}active{% endif %}"
+              data-tab="login" onclick="showTab('login')">Sign In</button>
+      <button class="tab-btn {% if show == 'signup' %}active{% endif %}"
+              data-tab="signup" onclick="showTab('signup')">Sign Up</button>
     </div>
 
     <!-- LOGIN form -->
     <form id="login-form"
-          class="auth-form {% if show_signup %}hidden{% endif %}"
+          class="auth-form {% if show == 'signup' %}hidden{% endif %}"
           method="POST" action="/auth/login">
-      {% if error_login %}
-        <div class="error-msg">{{ error_login }}</div>
+      {% if login_error %}
+        <div class="form-error">{{ login_error }}</div>
       {% endif %}
-      <input class="input-field" type="text"     name="username"
-             placeholder="Username"    required autocomplete="username">
-      <input class="input-field" type="password" name="password"
-             placeholder="Password"   required autocomplete="current-password">
-      <button class="btn btn-primary full-width" type="submit">Sign In</button>
+      <div class="field">
+        <label for="l-user">Username</label>
+        <input id="l-user" type="text" name="username"
+               placeholder="Enter your username"
+               required autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="l-pass">Password</label>
+        <input id="l-pass" type="password" name="password"
+               placeholder="Enter your password"
+               required autocomplete="current-password">
+      </div>
+      <button type="submit" class="submit-btn">Sign In</button>
     </form>
 
     <!-- SIGNUP form -->
     <form id="signup-form"
-          class="auth-form {% if not show_signup %}hidden{% endif %}"
+          class="auth-form {% if show != 'signup' %}hidden{% endif %}"
           method="POST" action="/auth/signup">
-      {% if error_signup %}
-        <div class="error-msg">{{ error_signup }}</div>
+      {% if signup_error %}
+        <div class="form-error">{{ signup_error }}</div>
       {% endif %}
-      <input class="input-field" type="text"     name="username"
-             placeholder="Choose a username" required autocomplete="username">
-      <input class="input-field" type="password" name="password"
-             placeholder="Create a password"required autocomplete="new-password">
-      <button class="btn btn-primary full-width" type="submit">Create Account</button>
+      <div class="field">
+        <label for="s-user">Choose a username</label>
+        <input id="s-user" type="text" name="username"
+               placeholder="e.g. john_student"
+               required autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="s-pass">Create a password</label>
+        <input id="s-pass" type="password" name="password"
+               placeholder="Minimum 6 characters"
+               required autocomplete="new-password">
+      </div>
+      <button type="submit" class="submit-btn">Create Account</button>
     </form>
 
   </div>
