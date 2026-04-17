@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Sync — Sign In</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="auth-container">
+  <div class="auth-card glass">
+    <div class="auth-logo">Student Sync</div>
+    <p class="auth-sub">Your secure cloud file manager</p>
+
+    <!-- Tab strip -->
+    <div class="auth-tabs">
+      <button class="auth-tab {% if not show_signup %}active{% endif %}"
+              onclick="switchTab('login')">Sign In</button>
+      <button class="auth-tab {% if show_signup %}active{% endif %}"
+              onclick="switchTab('signup')">Sign Up</button>
+    </div>
+
+    <!-- LOGIN form -->
+    <form id="login-form"
+          class="auth-form {% if show_signup %}hidden{% endif %}"
+          method="POST" action="/auth/login">
+      {% if error_login %}
+        <div class="error-msg">{{ error_login }}</div>
+      {% endif %}
+      <input class="input-field" type="text"     name="username"
+             placeholder="Username"    required autocomplete="username">
+      <input class="input-field" type="password" name="password"
+             placeholder="Password"   required autocomplete="current-password">
+      <button class="btn btn-primary full-width" type="submit">Sign In</button>
+    </form>
+
+    <!-- SIGNUP form -->
+    <form id="signup-form"
+          class="auth-form {% if not show_signup %}hidden{% endif %}"
+          method="POST" action="/auth/signup">
+      {% if error_signup %}
+        <div class="error-msg">{{ error_signup }}</div>
+      {% endif %}
+      <input class="input-field" type="text"     name="username"
+             placeholder="Choose a username" required autocomplete="username">
+      <input class="input-field" type="password" name="password"
+             placeholder="Create a password"required autocomplete="new-password">
+      <button class="btn btn-primary full-width" type="submit">Create Account</button>
+    </form>
+
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
