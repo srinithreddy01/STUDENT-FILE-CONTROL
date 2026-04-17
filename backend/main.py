@@ -329,7 +329,7 @@ def dashboard_page():
     # ── Main Content ─────────────────────────────────────────────────
     with ui.column().classes('p-8 gap-6 w-full max-w-screen-xl mx-auto'):
 
-        # Top bar: title + upload button
+        # Top bar: title + Home + upload button
         with ui.row().classes('items-end justify-between w-full'):
             with ui.column().classes('gap-0'):
                 page_title = ui.label(st['folder_name']).classes(
@@ -337,12 +337,24 @@ def dashboard_page():
                 )
                 file_count = ui.label('').classes('text-sm text-gray-400 mt-1')
 
-            upload_btn = ui.button(
-                'Upload File', icon='upload',
-                on_click=lambda: ui.run_javascript(
-                    'document.querySelector(".q-uploader__input").click()'
-                )
-            ).classes('bg-blue-600 text-white font-semibold').props('unelevated')
+            # Action buttons row (right side)
+            with ui.row().classes('gap-3 items-center'):
+
+                # Home button — always visible in main area
+                home_main_btn = ui.button(
+                    'Home', icon='home',
+                    on_click=lambda: go_home()
+                ).props('outline').classes(
+                    'border-blue-200 text-blue-600 font-semibold hover:bg-blue-50'
+                ).tooltip('Go to All Files')
+
+                # Upload button
+                upload_btn = ui.button(
+                    'Upload File', icon='upload',
+                    on_click=lambda: ui.run_javascript(
+                        'document.querySelector(".q-uploader__input").click()'
+                    )
+                ).classes('bg-blue-600 text-white font-semibold').props('unelevated')
 
         # ── Upload zone ─────────────────────────────────────────────
         with ui.element('div').classes('w-full'):
