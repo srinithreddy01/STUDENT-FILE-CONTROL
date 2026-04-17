@@ -24,23 +24,33 @@ function switchTab(tab) {
 
 // ── Folder modal ───────────────────────────────────────────────────────────────
 function openFolderModal() {
-  document.getElementById('folderModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('folderNameInput').focus(), 50);
+  const modal = document.getElementById('folderModal');
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    const input = document.getElementById('folderNameInput');
+    if (input) input.focus();
+  }, 60);
 }
 
 function closeFolderModal() {
   document.getElementById('folderModal').style.display = 'none';
-  document.getElementById('folderNameInput').value = '';
+  const input = document.getElementById('folderNameInput');
+  if (input) input.value = '';
   const err = document.getElementById('folderError');
-  if (err) { err.style.display = 'none'; }
+  if (err) err.style.display = 'none';
 }
 
+// Create folder via POST form-data → JSON response
 async function createFolder() {
-  const nameInput = document.getElementById('folderNameInput');
-  const name      = nameInput.value.trim();
-  const errEl     = document.getElementById('folderError');
+  const input = document.getElementById('folderNameInput');
+  const errEl = document.getElementById('folderError');
+  const name  = input ? input.value.trim() : '';
 
-  if (!name) return;
+  if (!name) {
+    errEl.textContent   = 'Please enter a folder name.';
+    errEl.style.display = 'block';
+    return;
+  }
   errEl.style.display = 'none';
 
   const fd = new FormData();
@@ -49,71 +59,105 @@ async function createFolder() {
   try {
     const res  = await fetch('/folder/create', { method: 'POST', body: fd });
     const data = await res.json();
+
     if (!res.ok) {
-      errEl.textContent    = data.error;
-      errEl.style.display  = 'block';
+      errEl.textContent   = data.error || 'Failed to create folder.';
+      errEl.style.display = 'block';
       return;
     }
+    // Success — close modal and go to the new folder
     closeFolderModal();
-    window.location.reload();
-  } catch {
-    errEl.textContent   = 'Network error — please try again';
+    window.location.href = '/dashboard?folder=' + data.id;
+
+  } catch (e) {
+    errEl.textContent   = 'Network error — please try again.';
     errEl.style.display = 'block';
   }
 }
 
 // ── Delete folder ──────────────────────────────────────────────────────────────
+// Called from the inline × button on each folder row
 async function deleteFolder(event, folderId) {
+  // Stop the click from bubbling up to the folder-item (which navigates)
   event.stopPropagation();
   event.preventDefault();
-  if (!confirm('Delete this folder? Files inside will move to All Files.')) return;
 
-  const res = await fetch(`/folder/${folderId}`, { method: 'DELETE' });
-  if (res.ok) {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('folder') == folderId) {
-      window.location.href = '/dashboard';
+  if (!confirm('Delete this folder?\nFiles inside will be moved to All Files.')) return;
+
+  try {
+    const res = await fetch('/folder/' + folderId, { method: 'DELETE' });
+
+    if (res.ok) {
+      // If we are currently inside that folder, jump to root
+      const urlFolder = new URLSearchParams(window.location.search).get('folder');
+      if (String(urlFolder) === String(folderId)) {
+        window.location.href = '/dashboard';
+      } else {
+        window.location.reload();
+      }
     } else {
-      window.location.reload();
+      const data = await res.json().catch(() => ({}));
+      alert('Could not delete folder: ' + (data.error || res.status));
     }
+  } catch (e) {
+    alert('Network error while deleting folder.');
   }
 }
 
 // ── Delete file ────────────────────────────────────────────────────────────────
 async function deleteFile(fileId) {
   if (!confirm('Permanently delete this file?')) return;
-  const res = await fetch(`/file/${fileId}`, { method: 'DELETE' });
-  if (res.ok) {
-    const card = document.getElementById(`file-${fileId}`);
-    if (card) {
-      card.style.animation = 'fadeOut .3s ease forwards';
-      setTimeout(() => card.remove(), 320);
+
+  try {
+    const res = await fetch('/file/' + fileId, { method: 'DELETE' });
+
+    if (res.ok) {
+      const card = document.getElementById('file-' + fileId);
+      if (card) {
+        card.style.transition = 'opacity .25s, transform .25s';
+        card.style.opacity    = '0';
+        card.style.transform  = 'scale(.96)';
+        setTimeout(() => card.remove(), 260);
+      }
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert('Could not delete file: ' + (data.error || res.status));
     }
+  } catch (e) {
+    alert('Network error while deleting file.');
   }
 }
 
-// ── Upload with progress ───────────────────────────────────────────────────────
+// ── Upload with XHR progress ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
 
-  /* ── Folder modal keyboard shortcuts ── */
-  const nameInput = document.getElementById('folderNameInput');
-  if (nameInput) {
-    nameInput.addEventListener('keydown', function (e) {
+  // Folder modal: keyboard shortcuts
+  const folderInput = document.getElementById('folderNameInput');
+  if (folderInput) {
+    folderInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter')  createFolder();
       if (e.key === 'Escape') closeFolderModal();
     });
   }
 
-  /* ── Upload zone ── */
-  const zone          = document.getElementById('uploadZone');
-  const fileInput     = document.getElementById('fileInput');
-  const progressWrap  = document.getElementById('progressWrap');
-  const progressBar   = document.getElementById('progressBar');
-  const uploadStatus  = document.getElementById('uploadStatus');
+  // Close modal when clicking the dark overlay
+  const overlay = document.getElementById('folderModal');
+  if (overlay) {
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeFolderModal();
+    });
+  }
 
-  if (!zone) return;   // not on dashboard page
+  // ── Upload zone wiring ──────────────────────────────────────────
+  const zone         = document.getElementById('uploadZone');
+  const fileInput    = document.getElementById('fileInput');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar  = document.getElementById('progressBar');
+  const statusEl     = document.getElementById('uploadStatus');
 
-  // click zone → open file picker (prevents double-trigger from inner button clicks)
+  if (!zone || !fileInput) return;   // not on dashboard
+
+  // Clicking zone opens picker (except when clicking the Upload button)
   zone.addEventListener('click', function (e) {
     if (e.target.closest('.btn')) return;
     fileInput.click();
@@ -123,8 +167,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (this.files && this.files[0]) doUpload(this.files[0]);
   });
 
-  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', e => { e.preventDefault(); zone.classList.remove('dragover'); });
+  zone.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+  });
   zone.addEventListener('drop', function (e) {
     e.preventDefault();
     zone.classList.remove('dragover');
@@ -133,18 +183,22 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   function doUpload(file) {
-    const folderParam = new URL(window.location.href).searchParams.get('folder');
+    // Read current folder from URL
+    const folderParam = new URLSearchParams(window.location.search).get('folder');
+
     const fd = new FormData();
     fd.append('file', file);
+    // Attach folder_id only when inside a real folder (not 'root' or empty)
     if (folderParam && folderParam !== 'root') {
       fd.append('folder_id', folderParam);
     }
 
+    // UI: show progress
     progressWrap.style.display = 'block';
     progressBar.style.width    = '0%';
-    uploadStatus.textContent   = `Uploading "${file.name}"…`;
+    statusEl.textContent       = 'Uploading "' + file.name + '"…';
     zone.style.pointerEvents   = 'none';
-    fileInput.value            = '';
+    fileInput.value            = '';   // reset so the same file can be re-selected
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/upload');
@@ -152,26 +206,26 @@ document.addEventListener('DOMContentLoaded', function () {
     xhr.upload.addEventListener('progress', function (e) {
       if (e.lengthComputable) {
         const pct = Math.round((e.loaded / e.total) * 100);
-        progressBar.style.width  = pct + '%';
-        uploadStatus.textContent = `Uploading… ${pct}%`;
+        progressBar.style.width = pct + '%';
+        statusEl.textContent    = 'Uploading… ' + pct + '%';
       }
     });
 
     xhr.addEventListener('load', function () {
       if (xhr.status === 201) {
-        uploadStatus.textContent = '✅ Upload complete! Refreshing…';
-        setTimeout(() => window.location.reload(), 800);
+        statusEl.textContent = '✅ Upload complete! Refreshing…';
+        setTimeout(() => window.location.reload(), 700);
       } else {
         let msg = 'Upload failed';
         try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
-        uploadStatus.textContent   = '❌ ' + msg;
+        statusEl.textContent       = '❌ ' + msg;
         progressWrap.style.display = 'none';
         zone.style.pointerEvents   = 'auto';
       }
     });
 
     xhr.addEventListener('error', function () {
-      uploadStatus.textContent   = '❌ Network error — please try again';
+      statusEl.textContent       = '❌ Network error — please try again';
       progressWrap.style.display = 'none';
       zone.style.pointerEvents   = 'auto';
     });
