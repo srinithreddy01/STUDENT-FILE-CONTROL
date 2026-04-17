@@ -1,0 +1,27 @@
+# ==== Python / Backend ====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.db
+*.sqlite3
+backend/uploads/
+venv/
+.venv/
+env/
+
+# ==== Node / Frontend ====
+node_modules/
+dist/
+.vite/
+.env
+.env.local
+.env.*.local
+
+# ==== OS & IDE ====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
